@@ -92,6 +92,29 @@
     <label for="customFields" style="margin-top:10px;">trmnl.plugin_settings.custom_fields_values (JSON, optionnel)</label>
     <textarea id="customFields" rows="2" placeholder='{"mode": "encyclopedia"}'></textarea>
     <div class="hint">Utilisé pour évaluer l'URL de polling si elle contient du Liquid référençant tes custom fields (ex. {{ trmnl.plugin_settings.custom_fields_values.mode }}).</div>
+
+    <label for="corsProxy" style="margin-top:10px;">Proxy CORS (optionnel, pour Workers/API sans header CORS)</label>
+    <input id="corsProxy" placeholder="https://ton-proxy.workers.dev/?url=" />
+    <details style="margin-top:4px;">
+      <summary class="hint" style="cursor:pointer;">Si le fetch échoue en CORS, déployer ton propre proxy (2 min)</summary>
+      <div class="hint" style="margin-top:6px;">Utilisé automatiquement en fallback si le fetch direct échoue. Colle ce Worker sur workers.cloudflare.com (gratuit), note son URL suivie de <code>?url=</code>, et mets-la dans le champ ci-dessus :</div>
+      <pre style="white-space:pre-wrap; font-size:10px; color:var(--muted); max-height:220px; overflow:auto; margin:6px 0 0; background:#0f1113; border:1px solid var(--border); border-radius:4px; padding:8px;">export default {
+  async fetch(request) {
+    const target = new URL(request.url).searchParams.get('url');
+    if (!target) return new Response('Missing ?url=', { status: 400 });
+    const res = await fetch(target, { cf: { cacheTtl: 0 } });
+    const body = await res.arrayBuffer();
+    return new Response(body, {
+      status: res.status,
+      headers: {
+        'Content-Type': res.headers.get('Content-Type') || 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  }
+};</pre>
+    </details>
+
     <button id="fetchBtn">Charger les données</button>
     <div id="fetchStatus" class="status"></div>
     <details id="dataInspector" style="margin-top:6px; display:none;">
@@ -131,6 +154,11 @@
 
     <button id="renderBtn">Rendre</button>
     <div id="jsonSizeStatus" class="status"></div>
+
+    <label style="margin-top:16px;">Linter Chef (simulation)</label>
+    <button id="lintBtn" class="secondary">Lancer le linter</button>
+    <div id="lintResults" style="margin-top:8px;"></div>
+    <div class="hint">Basé sur les règles documentées par TRMNL (docs "Recipe best practices") + comportement observé communautairement — approximation, pas une garantie d'acceptation par le vrai Chef.</div>
   </div>
 
   <div id="previewGrid" class="grid">
@@ -307,16 +335,47 @@
       lastData = null;
       return;
     }
-    try{
-      var res = await fetch(url, {cache:'no-store'});
+    async function tryFetch(targetUrl){
+      var res = await fetch(targetUrl, {cache:'no-store'});
       if(!res.ok) throw new Error('HTTP ' + res.status);
-      var text = await res.text();
+      return res.text();
+    }
+
+    var text;
+    var usedProxy = false;
+    try{
+      text = await tryFetch(url);
+    }catch(e){
+      var isNetworkErr = e instanceof TypeError;
+      var proxy = document.getElementById('corsProxy').value.trim();
+      if(isNetworkErr && proxy){
+        try{
+          text = await tryFetch(proxy + encodeURIComponent(url));
+          usedProxy = true;
+        }catch(e2){
+          lastData = null;
+          document.getElementById('dataInspector').style.display = 'none';
+          statusEl.textContent = 'Échec direct ET via proxy (' + proxy + ') sur ' + url + ' — ' + e2.message;
+          statusEl.className = 'status err';
+          return;
+        }
+      } else {
+        lastData = null;
+        document.getElementById('dataInspector').style.display = 'none';
+        statusEl.textContent = isNetworkErr
+          ? "Échec réseau sur " + url + " — probablement CORS. Renseigne un proxy CORS ci-dessus, ou ajoute un header Access-Control-Allow-Origin côté serveur."
+          : 'Échec — ' + e.message;
+        statusEl.className = 'status err';
+        return;
+      }
+    }
+    try{
       var data;
       try{ data = JSON.parse(text); }
       catch(e){ throw new Error('Réponse reçue mais non-JSON'); }
       lastData = data;
       var bytes = new Blob([text]).size;
-      statusEl.textContent = 'OK (' + url + ') — ' + bytes.toLocaleString('fr-FR') + ' octets reçus.';
+      statusEl.textContent = 'OK' + (usedProxy ? ' via proxy' : '') + ' (' + url + ') — ' + bytes.toLocaleString('fr-FR') + ' octets reçus.';
       statusEl.className = 'status ok';
       updateJsonSizeStatus(bytes);
       document.getElementById('dataInspector').style.display = 'block';
@@ -324,10 +383,7 @@
     }catch(e){
       lastData = null;
       document.getElementById('dataInspector').style.display = 'none';
-      var isNetworkErr = e instanceof TypeError;
-      statusEl.textContent = isNetworkErr
-        ? "Échec réseau sur " + url + " — probablement CORS. L'endpoint doit autoriser les requêtes cross-origin."
-        : 'Échec — ' + e.message;
+      statusEl.textContent = 'Échec — ' + e.message;
       statusEl.className = 'status err';
     }
   }
@@ -403,6 +459,85 @@
     el.className = 'hint';
   });
 
+  // Simulation du linter "Chef" de TRMNL, basée sur :
+  // - la doc officielle "Recipe best practices" (help.trmnl.com/en/articles/11395668) qui liste
+  //   les déclarations CSS rendues inutiles par le Framework
+  // - un seuil de tolérance (max 6 occurrences au total) observé communautairement, non documenté
+  //   officiellement en détail — donc traité ici comme une approximation, pas une garantie.
+  var CHEF_RAW_CSS_TERMS = ['font-size','padding','margin','display','justify-content',
+    'background-color','color','border-radius','text-align','object-fit'];
+
+  function runChefLint(fullMarkup, rawPollUrl){
+    var results = [];
+
+    // Règle 1 : déclarations CSS brutes que le Framework rend inutiles
+    var termCounts = {};
+    var total = 0;
+    CHEF_RAW_CSS_TERMS.forEach(function(term){
+      var re = new RegExp(term.replace(/[-]/g, '\\-'), 'gi');
+      var matches = fullMarkup.match(re);
+      var n = matches ? matches.length : 0;
+      if(n > 0){ termCounts[term] = n; total += n; }
+    });
+    if(total > 6){
+      results.push({level:'error', msg:'Trop de déclarations CSS brutes (' + total + ' au total, seuil observé ≈6) : ' +
+        Object.keys(termCounts).map(function(k){ return k + '×' + termCounts[k]; }).join(', ') +
+        '. Remplace par les classes utilitaires du Framework quand possible.'});
+    } else if(total > 0){
+      results.push({level:'warn', msg:'Déclarations CSS brutes détectées (' + total + '/6, sous le seuil) : ' +
+        Object.keys(termCounts).map(function(k){ return k + '×' + termCounts[k]; }).join(', ') +
+        '. La doc TRMNL les considère "inutiles" grâce au Framework — à remplacer si possible.'});
+    } else {
+      results.push({level:'ok', msg:'Aucune déclaration CSS brute détectée parmi les propriétés couvertes par le Framework.'});
+    }
+
+    // Règle 2 : syntaxe d'interpolation dans l'URL de polling
+    if(/##\{\{/.test(rawPollUrl)){
+      results.push({level:'error', msg:'L\'URL de polling utilise ##{{ }} — utilise du Liquid simple {{ }} à la place (uniquement ##{{ }} dans les URLs de polling classiques, pas dans un template Liquid complet avec {% if %}).'});
+    }
+
+    // Règle 3 : gestion de l'état "pas de données"
+    if(!/has_data/i.test(fullMarkup)){
+      results.push({level:'warn', msg:'Aucune référence à has_data trouvée — best practice TRMNL : gérer explicitement l\'état "pas encore de données" avant le premier poll.'});
+    } else {
+      results.push({level:'ok', msg:'has_data référencé — bon signe pour la gestion de l\'état initial.'});
+    }
+
+    // Règle 4 : URLs non-HTTPS dans les sources d'images
+    if(/src=["']http:\/\//i.test(fullMarkup)){
+      results.push({level:'error', msg:'Au moins une src="http://..." non sécurisée détectée — TRMNL exige des URLs HTTPS pour les images.'});
+    }
+
+    // Règle 5 : usage de object-fit brut au lieu des classes Framework dédiées
+    if(/object-fit\s*:/i.test(fullMarkup) && !/image--contain|image--cover/.test(fullMarkup)){
+      results.push({level:'warn', msg:'object-fit en CSS brut détecté sans les classes Framework image--contain / image--cover correspondantes.'});
+    }
+
+    return results;
+  }
+
+  function renderLintResults(results){
+    var el = document.getElementById('lintResults');
+    if(results.length === 0){
+      el.innerHTML = '<div class="hint">Rien à signaler.</div>';
+      return;
+    }
+    var colors = {error:'var(--err)', warn:'var(--warn)', ok:'var(--accent)'};
+    var icons = {error:'✕', warn:'⚠', ok:'✓'};
+    el.innerHTML = results.map(function(r){
+      return '<div style="font-size:12px; color:' + colors[r.level] + '; margin-bottom:6px;">' +
+        icons[r.level] + ' ' + r.msg + '</div>';
+    }).join('');
+  }
+
+  function lintCurrentTemplate(){
+    var tpl = document.getElementById('liquidTpl').value;
+    var shared = document.getElementById('sharedMarkup').value;
+    var rawPollUrl = document.getElementById('pollUrl').value;
+    var fullMarkup = shared + '\n' + tpl;
+    renderLintResults(runChefLint(fullMarkup, rawPollUrl));
+  }
+
   async function renderAll(){
     var grid = document.getElementById('previewGrid');
     var tpl = document.getElementById('liquidTpl').value;
@@ -466,6 +601,7 @@
       tpl: tpl,
       sharedMarkup: sharedRaw,
       customFields: document.getElementById('customFields').value,
+      corsProxy: document.getElementById('corsProxy').value,
       layout: layout,
       frameworkVersion: fwVersion,
       devices: devices.map(function(d){ return d.name; })
@@ -494,6 +630,7 @@
       tpl: document.getElementById('liquidTpl').value,
       sharedMarkup: document.getElementById('sharedMarkup').value,
       customFields: document.getElementById('customFields').value,
+      corsProxy: document.getElementById('corsProxy').value,
       layout: document.getElementById('layoutSelect').value,
       frameworkVersion: document.getElementById('frameworkVersion').value,
       devices: selectedDevices().map(function(d){ return d.name; })
@@ -505,6 +642,7 @@
     document.getElementById('liquidTpl').value = p.tpl || '';
     document.getElementById('sharedMarkup').value = p.sharedMarkup || '';
     document.getElementById('customFields').value = p.customFields || '';
+    document.getElementById('corsProxy').value = p.corsProxy || '';
     document.getElementById('layoutSelect').value = p.layout || 'full';
     document.getElementById('frameworkVersion').value = p.frameworkVersion || 'latest';
     deviceModels.forEach(function(m){
@@ -545,6 +683,7 @@
       if(cfg.tpl) document.getElementById('liquidTpl').value = cfg.tpl;
       if(cfg.sharedMarkup) document.getElementById('sharedMarkup').value = cfg.sharedMarkup;
       if(cfg.customFields) document.getElementById('customFields').value = cfg.customFields;
+      if(cfg.corsProxy) document.getElementById('corsProxy').value = cfg.corsProxy;
       if(cfg.layout) document.getElementById('layoutSelect').value = cfg.layout;
       if(cfg.frameworkVersion) document.getElementById('frameworkVersion').value = cfg.frameworkVersion;
       if(cfg.devices && cfg.devices.length){
@@ -558,6 +697,7 @@
 
   document.getElementById('fetchBtn').addEventListener('click', fetchData);
   document.getElementById('renderBtn').addEventListener('click', renderAll);
+  document.getElementById('lintBtn').addEventListener('click', lintCurrentTemplate);
   document.getElementById('saveProjectBtn').addEventListener('click', saveProject);
   document.getElementById('deleteProjectBtn').addEventListener('click', deleteProject);
   document.getElementById('projectSelect').addEventListener('change', function(){
