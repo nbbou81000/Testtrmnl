@@ -87,8 +87,11 @@
     </div>
     <div class="hint">Sauvegarde l'URL, le template, le Shared, le layout et les devices sélectionnés sous ce nom, pour retrouver chaque recipe en un clic.</div>
 
-    <label for="pollUrl">URL de polling</label>
-    <input id="pollUrl" placeholder="https://tonprojet.github.io/data.json" />
+    <label for="pollUrl">URL de polling (peut être du Liquid, comme dans TRMNL)</label>
+    <textarea id="pollUrl" rows="3" placeholder="https://tonprojet.github.io/data.json&#10;ou un template Liquid calculant l'URL dynamiquement"></textarea>
+    <label for="customFields" style="margin-top:10px;">trmnl.plugin_settings.custom_fields_values (JSON, optionnel)</label>
+    <textarea id="customFields" rows="2" placeholder='{"mode": "encyclopedia"}'></textarea>
+    <div class="hint">Utilisé pour évaluer l'URL de polling si elle contient du Liquid référençant tes custom fields (ex. {{ trmnl.plugin_settings.custom_fields_values.mode }}).</div>
     <button id="fetchBtn">Charger les données</button>
     <div id="fetchStatus" class="status"></div>
     <details id="dataInspector" style="margin-top:6px; display:none;">
@@ -262,11 +265,48 @@
     });
   }
 
+  async function resolvePollUrl(rawField){
+    var customFieldsRaw = document.getElementById('customFields').value.trim();
+    var customFields = {};
+    if(customFieldsRaw){
+      try{ customFields = JSON.parse(customFieldsRaw); }
+      catch(e){ throw new Error('JSON invalide dans custom_fields_values : ' + e.message); }
+    }
+    var context = { trmnl: { plugin_settings: { custom_fields_values: customFields } } };
+    var resolved;
+    try{
+      resolved = await engine.parseAndRender(rawField, context);
+    }catch(e){
+      throw new Error('Erreur Liquid dans l\'URL de polling : ' + e.message);
+    }
+    var lines = resolved.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
+    var urlLines = lines.filter(function(l){ return /^https?:\/\//i.test(l); });
+    return { chosen: urlLines[0] || lines[0] || '', allLines: lines };
+  }
+
   async function fetchData(){
-    var url = document.getElementById('pollUrl').value.trim();
+    var rawField = document.getElementById('pollUrl').value.trim();
     var statusEl = document.getElementById('fetchStatus');
-    if(!url){ statusEl.textContent = 'Entre une URL.'; statusEl.className = 'status warn'; return; }
-    statusEl.textContent = 'Chargement…'; statusEl.className = 'status';
+    if(!rawField){ statusEl.textContent = 'Entre une URL.'; statusEl.className = 'status warn'; return; }
+    statusEl.textContent = 'Résolution de l\'URL…'; statusEl.className = 'status';
+    var url;
+    try{
+      var resolution = await resolvePollUrl(rawField);
+      url = resolution.chosen;
+      if(!url){ throw new Error('Le rendu Liquid de l\'URL est vide.'); }
+      if(resolution.allLines.length > 1){
+        statusEl.textContent = '⚠ Le champ résout en ' + resolution.allLines.length + ' lignes non vides — utilisation de : ' + url + ' (vérifie ton template, une seule ligne est normalement attendue).';
+        statusEl.className = 'status warn';
+      } else {
+        statusEl.textContent = 'URL résolue : ' + url + ' — chargement…';
+        statusEl.className = 'status';
+      }
+    }catch(e){
+      statusEl.textContent = 'Échec — ' + e.message;
+      statusEl.className = 'status err';
+      lastData = null;
+      return;
+    }
     try{
       var res = await fetch(url, {cache:'no-store'});
       if(!res.ok) throw new Error('HTTP ' + res.status);
@@ -276,7 +316,7 @@
       catch(e){ throw new Error('Réponse reçue mais non-JSON'); }
       lastData = data;
       var bytes = new Blob([text]).size;
-      statusEl.textContent = 'OK — ' + bytes.toLocaleString('fr-FR') + ' octets reçus.';
+      statusEl.textContent = 'OK (' + url + ') — ' + bytes.toLocaleString('fr-FR') + ' octets reçus.';
       statusEl.className = 'status ok';
       updateJsonSizeStatus(bytes);
       document.getElementById('dataInspector').style.display = 'block';
@@ -286,7 +326,7 @@
       document.getElementById('dataInspector').style.display = 'none';
       var isNetworkErr = e instanceof TypeError;
       statusEl.textContent = isNetworkErr
-        ? "Échec réseau — probablement CORS. L'endpoint doit autoriser les requêtes cross-origin."
+        ? "Échec réseau sur " + url + " — probablement CORS. L'endpoint doit autoriser les requêtes cross-origin."
         : 'Échec — ' + e.message;
       statusEl.className = 'status err';
     }
@@ -425,6 +465,7 @@
       url: document.getElementById('pollUrl').value,
       tpl: tpl,
       sharedMarkup: sharedRaw,
+      customFields: document.getElementById('customFields').value,
       layout: layout,
       frameworkVersion: fwVersion,
       devices: devices.map(function(d){ return d.name; })
@@ -452,6 +493,7 @@
       url: document.getElementById('pollUrl').value,
       tpl: document.getElementById('liquidTpl').value,
       sharedMarkup: document.getElementById('sharedMarkup').value,
+      customFields: document.getElementById('customFields').value,
       layout: document.getElementById('layoutSelect').value,
       frameworkVersion: document.getElementById('frameworkVersion').value,
       devices: selectedDevices().map(function(d){ return d.name; })
@@ -462,6 +504,7 @@
     document.getElementById('pollUrl').value = p.url || '';
     document.getElementById('liquidTpl').value = p.tpl || '';
     document.getElementById('sharedMarkup').value = p.sharedMarkup || '';
+    document.getElementById('customFields').value = p.customFields || '';
     document.getElementById('layoutSelect').value = p.layout || 'full';
     document.getElementById('frameworkVersion').value = p.frameworkVersion || 'latest';
     deviceModels.forEach(function(m){
@@ -501,6 +544,7 @@
       if(cfg.url) document.getElementById('pollUrl').value = cfg.url;
       if(cfg.tpl) document.getElementById('liquidTpl').value = cfg.tpl;
       if(cfg.sharedMarkup) document.getElementById('sharedMarkup').value = cfg.sharedMarkup;
+      if(cfg.customFields) document.getElementById('customFields').value = cfg.customFields;
       if(cfg.layout) document.getElementById('layoutSelect').value = cfg.layout;
       if(cfg.frameworkVersion) document.getElementById('frameworkVersion').value = cfg.frameworkVersion;
       if(cfg.devices && cfg.devices.length){
