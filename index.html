@@ -284,6 +284,8 @@
     var classes = model.css && model.css.classes ? Object.values(model.css.classes).join(' ') : '';
     var w = getVar(model, '--screen-w', model.width + 'px');
     var h = getVar(model, '--screen-h', model.height + 'px');
+    var nativeW = model.width + 'px';
+    var nativeH = model.height + 'px';
     var diagnosticScript =
       '<script>' +
       'function reportDiag(){' +
@@ -317,7 +319,7 @@
       '<link rel="stylesheet" href="https://trmnl.com/css/latest/plugins.css">' +
       '<script src="https://trmnl.com/js/latest/plugins.js"><\/script>' +
       '<style>:root{' + vars + '} html,body{margin:0;padding:0;overflow:hidden;} ' +
-      'body{width:' + w + '; height:' + h + ';}</style>' +
+      'body{width:' + nativeW + '; height:' + nativeH + ';}</style>' +
       '</head><body class="environment trmnl">' + diagnosticScript + '<div class="screen ' + classes + '"><div class="view view--full">' + renderedHtml + '</div></div></body></html>';
   }
 
@@ -355,9 +357,9 @@
 
     grid.innerHTML = '';
     devices.forEach(function(model){
-      var cssW = parseInt(getVar(model, '--screen-w', model.width + 'px'), 10);
-      var cssH = parseInt(getVar(model, '--screen-h', model.height + 'px'), 10);
-      var scale = Math.min(300 / cssW, 220 / cssH, 1);
+      var nativeW = model.width;
+      var nativeH = model.height;
+      var scale = Math.min(300 / nativeW, 220 / nativeH, 1);
       var docHtml = buildIframeDoc(rendered, model);
 
       var card = document.createElement('div');
@@ -367,12 +369,12 @@
         '<span>' + model.width + '×' + model.height + ' · ' + model.bit_depth + 'bit' +
         (model.image_size_limit ? ' · limite image ' + Math.round(model.image_size_limit / 1000) + 'KB' : '') +
         '</span></div>' +
-        '<div class="preview-wrap" style="height:' + (cssH * scale + 28) + 'px;">' +
-        '<div style="position:relative;width:' + (cssW * scale) + 'px;height:' + (cssH * scale) + 'px;overflow:hidden;">' +
-        '<div style="position:absolute;top:0;left:0;width:' + cssW + 'px;height:' + cssH + 'px;transform:scale(' + scale + ');transform-origin:top left;">' +
-        '<iframe class="flash" width="' + cssW + '" height="' + cssH + '" sandbox="allow-scripts"></iframe>' +
+        '<div class="preview-wrap" style="height:' + (nativeH * scale + 28) + 'px;">' +
+        '<div style="position:relative;width:' + (nativeW * scale) + 'px;height:' + (nativeH * scale) + 'px;overflow:hidden;">' +
+        '<div style="position:absolute;top:0;left:0;width:' + nativeW + 'px;height:' + nativeH + 'px;transform:scale(' + scale + ');transform-origin:top left;">' +
+        '<iframe class="flash" width="' + nativeW + '" height="' + nativeH + '" sandbox="allow-scripts"></iframe>' +
         '</div></div></div>' +
-        '<div style="padding:8px 14px 0;"><a href="#" data-openfull class="hint" style="color:var(--accent); cursor:pointer;">Ouvrir en pleine taille (' + cssW + '×' + cssH + ')</a></div>' +
+        '<div style="padding:8px 14px 0;"><a href="#" data-openfull class="hint" style="color:var(--accent); cursor:pointer;">Ouvrir en pleine taille (' + nativeW + '×' + nativeH + ')</a></div>' +
         '<div id="diag_' + model.name + '" class="hint" style="padding:6px 14px;">Diagnostic en attente…</div>' +
         '<details style="padding:8px 14px;"><summary class="hint" style="cursor:pointer;">Voir le HTML généré</summary>' +
         '<pre style="white-space:pre-wrap; font-size:10px; color:var(--muted); max-height:160px; overflow:auto; margin:6px 0 0;">' +
