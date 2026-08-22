@@ -358,6 +358,7 @@
       var cssW = parseInt(getVar(model, '--screen-w', model.width + 'px'), 10);
       var cssH = parseInt(getVar(model, '--screen-h', model.height + 'px'), 10);
       var scale = Math.min(300 / cssW, 220 / cssH, 1);
+      var docHtml = buildIframeDoc(rendered, model);
 
       var card = document.createElement('div');
       card.className = 'device-card';
@@ -371,12 +372,19 @@
         '<div style="position:absolute;top:0;left:0;width:' + cssW + 'px;height:' + cssH + 'px;transform:scale(' + scale + ');transform-origin:top left;">' +
         '<iframe class="flash" width="' + cssW + '" height="' + cssH + '" sandbox="allow-scripts"></iframe>' +
         '</div></div></div>' +
+        '<div style="padding:8px 14px 0;"><a href="#" data-openfull class="hint" style="color:var(--accent); cursor:pointer;">Ouvrir en pleine taille (' + cssW + '×' + cssH + ')</a></div>' +
         '<div id="diag_' + model.name + '" class="hint" style="padding:6px 14px;">Diagnostic en attente…</div>' +
         '<details style="padding:8px 14px;"><summary class="hint" style="cursor:pointer;">Voir le HTML généré</summary>' +
         '<pre style="white-space:pre-wrap; font-size:10px; color:var(--muted); max-height:160px; overflow:auto; margin:6px 0 0;">' +
         escapeHtml(rendered) + '</pre></details>';
       grid.appendChild(card);
-      card.querySelector('iframe').srcdoc = buildIframeDoc(rendered, model);
+      card.querySelector('iframe').srcdoc = docHtml;
+      card.querySelector('[data-openfull]').addEventListener('click', function(ev){
+        ev.preventDefault();
+        var blob = new Blob([docHtml], {type: 'text/html'});
+        var url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      });
     });
 
     localStorage.setItem('trmnl_qa_suite_config', JSON.stringify({
