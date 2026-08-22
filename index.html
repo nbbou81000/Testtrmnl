@@ -367,9 +367,10 @@
         (model.image_size_limit ? ' · limite image ' + Math.round(model.image_size_limit / 1000) + 'KB' : '') +
         '</span></div>' +
         '<div class="preview-wrap" style="height:' + (cssH * scale + 28) + 'px;">' +
-        '<div style="width:' + cssW + 'px;height:' + cssH + 'px;transform:scale(' + scale + ');transform-origin:top left;">' +
+        '<div style="position:relative;width:' + (cssW * scale) + 'px;height:' + (cssH * scale) + 'px;overflow:hidden;">' +
+        '<div style="position:absolute;top:0;left:0;width:' + cssW + 'px;height:' + cssH + 'px;transform:scale(' + scale + ');transform-origin:top left;">' +
         '<iframe class="flash" width="' + cssW + '" height="' + cssH + '" sandbox="allow-scripts"></iframe>' +
-        '</div></div>' +
+        '</div></div></div>' +
         '<div id="diag_' + model.name + '" class="hint" style="padding:6px 14px;">Diagnostic en attente…</div>' +
         '<details style="padding:8px 14px;"><summary class="hint" style="cursor:pointer;">Voir le HTML généré</summary>' +
         '<pre style="white-space:pre-wrap; font-size:10px; color:var(--muted); max-height:160px; overflow:auto; margin:6px 0 0;">' +
