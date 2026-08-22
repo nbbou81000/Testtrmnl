@@ -74,6 +74,19 @@
 
 <div class="layout">
   <div class="panel">
+    <label>Projet</label>
+    <div style="display:flex; gap:6px;">
+      <select id="projectSelect" style="flex:1; background:#0f1113; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:9px 6px; font-family:var(--sans); font-size:12.5px;">
+        <option value="">— Nouveau / non sauvegardé —</option>
+      </select>
+    </div>
+    <div style="display:flex; gap:6px; margin-top:6px;">
+      <input id="projectNameInput" placeholder="nom du projet (ex. Souvenir Map)" style="flex:1;" />
+      <button id="saveProjectBtn" class="secondary" style="width:auto; margin-top:0; padding:9px 12px;">Sauver</button>
+      <button id="deleteProjectBtn" class="secondary" style="width:auto; margin-top:0; padding:9px 12px; color:var(--err); border-color:var(--err);">Suppr.</button>
+    </div>
+    <div class="hint">Sauvegarde l'URL, le template, le Shared, le layout et les devices sélectionnés sous ce nom, pour retrouver chaque recipe en un clic.</div>
+
     <label for="pollUrl">URL de polling</label>
     <input id="pollUrl" placeholder="https://tonprojet.github.io/data.json" />
     <button id="fetchBtn">Charger les données</button>
@@ -84,7 +97,16 @@
     </details>
     <div class="hint">Si le fetch échoue avec une erreur réseau/CORS, ton endpoint doit renvoyer un header Access-Control-Allow-Origin (GitHub Pages le fait généralement par défaut, à vérifier au cas par cas).</div>
 
-    <label for="liquidTpl">Template Liquid (contenu de full.liquid)</label>
+    <label for="layoutSelect">Layout de la recipe</label>
+    <select id="layoutSelect" style="background:#0f1113; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:9px 10px; font-family:var(--sans); font-size:12.5px;">
+      <option value="full">Full (full.liquid)</option>
+      <option value="half_horizontal">Half horizontal</option>
+      <option value="half_vertical">Half vertical</option>
+      <option value="quadrant">Quadrant</option>
+    </select>
+    <div class="hint">Détermine la classe view--{layout} appliquée autour de ton template, exactement comme le fait TRMNL selon le fichier de layout choisi.</div>
+
+    <label for="liquidTpl">Template Liquid (contenu du fichier de layout choisi ci-dessus)</label>
     <textarea id="liquidTpl" rows="10">&lt;div style="padding:20px;"&gt;
   &lt;span class="title"&gt;{{ title | default: "Titre" }}&lt;/span&gt;
   &lt;span class="value value--large"&gt;{{ value | default: "42" }}&lt;/span&gt;
@@ -95,6 +117,10 @@
     <label>Shared (onglet "Shared" de ton plugin/recipe)</label>
     <textarea id="sharedMarkup" rows="6" placeholder="Colle ici tout le contenu de l'onglet Shared, y compris les blocs {% template &quot;nom&quot; %}...{% endtemplate %}"></textarea>
     <div class="hint">TRMNL préfixe automatiquement ce contenu devant chaque vue avant le rendu. C'est ici que tes {% template %} référencés par {% render %} doivent être définis.</div>
+
+    <label for="frameworkVersion">Version du Framework</label>
+    <input id="frameworkVersion" placeholder="latest" value="latest" />
+    <div class="hint">"latest" par défaut, ou un numéro précis comme 3.1.0 pour tester une migration ou figer une version (voir framework_version dans settings.yml).</div>
 
     <label>Devices à tester</label>
     <div id="frameworkStatus" class="status">Chargement du Framework TRMNL (plugins.css/js)…</div>
@@ -278,7 +304,7 @@
     }
   }
 
-  function buildIframeDoc(renderedHtml, model){
+  function buildIframeDoc(renderedHtml, model, layout, fwVersion){
     var vars = (model.css && model.css.variables ? model.css.variables : [])
       .map(function(v){ return v[0] + ':' + v[1] + ';'; }).join('');
     var classes = model.css && model.css.classes ? Object.values(model.css.classes).join(' ') : '';
@@ -286,6 +312,10 @@
     var h = getVar(model, '--screen-h', model.height + 'px');
     var nativeW = model.width + 'px';
     var nativeH = model.height + 'px';
+    var ver = (fwVersion && fwVersion.trim()) ? fwVersion.trim() : 'latest';
+    var cssUrl = 'https://trmnl.com/css/' + encodeURIComponent(ver) + '/plugins.css';
+    var jsUrl = 'https://trmnl.com/js/' + encodeURIComponent(ver) + '/plugins.js';
+    var viewClass = 'view view--' + (layout || 'full');
     var diagnosticScript =
       '<script>' +
       'function reportDiag(){' +
@@ -316,11 +346,11 @@
       'setTimeout(reportDiag, 1500);' +
       '<\/script>';
     return '<!doctype html><html><head><meta charset="utf-8">' +
-      '<link rel="stylesheet" href="https://trmnl.com/css/latest/plugins.css">' +
-      '<script src="https://trmnl.com/js/latest/plugins.js"><\/script>' +
+      '<link rel="stylesheet" href="' + cssUrl + '">' +
+      '<script src="' + jsUrl + '"><\/script>' +
       '<style>:root{' + vars + '} html,body{margin:0;padding:0;overflow:hidden;} ' +
       'body{width:' + nativeW + '; height:' + nativeH + ';}</style>' +
-      '</head><body class="environment trmnl">' + diagnosticScript + '<div class="screen ' + classes + '"><div class="view view--full">' + renderedHtml + '</div></div></body></html>';
+      '</head><body class="environment trmnl">' + diagnosticScript + '<div class="screen ' + classes + '"><div class="' + viewClass + '">' + renderedHtml + '</div></div></body></html>';
   }
 
   window.addEventListener('message', function(e){
@@ -346,6 +376,8 @@
     var sharedRaw = document.getElementById('sharedMarkup').value;
     var sharedCleaned = extractTemplateDefs(sharedRaw);
     var fullTpl = sharedCleaned + '\n' + tpl;
+    var layout = document.getElementById('layoutSelect').value;
+    var fwVersion = document.getElementById('frameworkVersion').value;
 
     var rendered;
     try{
@@ -360,7 +392,7 @@
       var nativeW = model.width;
       var nativeH = model.height;
       var scale = Math.min(300 / nativeW, 220 / nativeH, 1);
-      var docHtml = buildIframeDoc(rendered, model);
+      var docHtml = buildIframeDoc(rendered, model, layout, fwVersion);
 
       var card = document.createElement('div');
       card.className = 'device-card';
@@ -393,8 +425,72 @@
       url: document.getElementById('pollUrl').value,
       tpl: tpl,
       sharedMarkup: sharedRaw,
+      layout: layout,
+      frameworkVersion: fwVersion,
       devices: devices.map(function(d){ return d.name; })
     }));
+  }
+
+  var PROJECTS_KEY = 'trmnl_qa_suite_projects';
+
+  function getProjects(){
+    try{ return JSON.parse(localStorage.getItem(PROJECTS_KEY)) || {}; }
+    catch(e){ return {}; }
+  }
+
+  function populateProjectSelect(selectName){
+    var projects = getProjects();
+    var sel = document.getElementById('projectSelect');
+    var names = Object.keys(projects).sort();
+    sel.innerHTML = '<option value="">— Nouveau / non sauvegardé —</option>' +
+      names.map(function(n){ return '<option value="' + n.replace(/"/g,'&quot;') + '">' + n + '</option>'; }).join('');
+    if(selectName && names.indexOf(selectName) !== -1) sel.value = selectName;
+  }
+
+  function currentFormAsProject(){
+    return {
+      url: document.getElementById('pollUrl').value,
+      tpl: document.getElementById('liquidTpl').value,
+      sharedMarkup: document.getElementById('sharedMarkup').value,
+      layout: document.getElementById('layoutSelect').value,
+      frameworkVersion: document.getElementById('frameworkVersion').value,
+      devices: selectedDevices().map(function(d){ return d.name; })
+    };
+  }
+
+  function applyProjectToForm(p){
+    document.getElementById('pollUrl').value = p.url || '';
+    document.getElementById('liquidTpl').value = p.tpl || '';
+    document.getElementById('sharedMarkup').value = p.sharedMarkup || '';
+    document.getElementById('layoutSelect').value = p.layout || 'full';
+    document.getElementById('frameworkVersion').value = p.frameworkVersion || 'latest';
+    deviceModels.forEach(function(m){
+      var cb = document.getElementById('dev_' + m.name);
+      if(cb) cb.checked = (p.devices || []).indexOf(m.name) !== -1;
+    });
+    lastData = null;
+    document.getElementById('fetchStatus').textContent = '';
+    document.getElementById('dataInspector').style.display = 'none';
+  }
+
+  function saveProject(){
+    var name = document.getElementById('projectNameInput').value.trim();
+    if(!name){ document.getElementById('fetchStatus').textContent = 'Donne un nom au projet avant de sauvegarder.'; document.getElementById('fetchStatus').className = 'status warn'; return; }
+    var projects = getProjects();
+    projects[name] = currentFormAsProject();
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    populateProjectSelect(name);
+  }
+
+  function deleteProject(){
+    var sel = document.getElementById('projectSelect');
+    var name = sel.value;
+    if(!name) return;
+    var projects = getProjects();
+    delete projects[name];
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    populateProjectSelect('');
+    document.getElementById('projectNameInput').value = '';
   }
 
   function restoreConfig(){
@@ -405,6 +501,8 @@
       if(cfg.url) document.getElementById('pollUrl').value = cfg.url;
       if(cfg.tpl) document.getElementById('liquidTpl').value = cfg.tpl;
       if(cfg.sharedMarkup) document.getElementById('sharedMarkup').value = cfg.sharedMarkup;
+      if(cfg.layout) document.getElementById('layoutSelect').value = cfg.layout;
+      if(cfg.frameworkVersion) document.getElementById('frameworkVersion').value = cfg.frameworkVersion;
       if(cfg.devices && cfg.devices.length){
         deviceModels.forEach(function(m){
           var cb = document.getElementById('dev_' + m.name);
@@ -416,6 +514,16 @@
 
   document.getElementById('fetchBtn').addEventListener('click', fetchData);
   document.getElementById('renderBtn').addEventListener('click', renderAll);
+  document.getElementById('saveProjectBtn').addEventListener('click', saveProject);
+  document.getElementById('deleteProjectBtn').addEventListener('click', deleteProject);
+  document.getElementById('projectSelect').addEventListener('change', function(){
+    var name = this.value;
+    if(!name) return;
+    var projects = getProjects();
+    if(projects[name]) applyProjectToForm(projects[name]);
+    document.getElementById('projectNameInput').value = name;
+  });
+  populateProjectSelect();
   loadModels();
   loadFramework();
 })();
