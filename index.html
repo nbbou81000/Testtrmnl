@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRMNL QA Suite</title>
+<style>
+  :root{
+    --bg:#0b0d0f;
+    --panel:#14171a;
+    --panel-2:#1c1f22;
+    --border:#2a2f34;
+    --text:#e8e6e1;
+    --muted:#8b9096;
+    --accent:#4fd1c5;
+    --warn:#e0b04f;
+    --err:#e0685a;
+    --mono:'JetBrains Mono', ui-monospace, monospace;
+    --sans:'Inter', -apple-system, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:var(--sans); line-height:1.4;}
+  header{padding:24px 20px 12px; border-bottom:1px solid var(--border);}
+  header h1{margin:0 0 4px; font-size:19px; letter-spacing:.2px;}
+  header p{margin:0; color:var(--muted); font-size:13px;}
+  .layout{display:grid; grid-template-columns:360px 1fr; gap:20px; padding:20px; align-items:start;}
+  @media (max-width:900px){ .layout{grid-template-columns:1fr;} }
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:18px; position:sticky; top:20px;}
+  @media (max-width:900px){ .panel{position:static;} }
+  .panel label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:16px 0 6px;}
+  .panel label:first-child{margin-top:0;}
+  input, textarea{
+    width:100%; background:#0f1113; color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:9px 10px; font-family:var(--mono); font-size:12.5px;
+  }
+  textarea{resize:vertical; min-height:160px;}
+  button{
+    background:var(--accent); color:#04211f; border:none; border-radius:6px;
+    padding:10px 16px; font-weight:600; font-size:13px; cursor:pointer; width:100%; margin-top:10px;
+  }
+  button:hover{filter:brightness(1.08);}
+  button.secondary{background:transparent; border:1px solid var(--border); color:var(--text);}
+  .status{font-size:11.5px; color:var(--muted); margin-top:8px; font-family:var(--mono);}
+  .status.ok{color:var(--accent);}
+  .status.warn{color:var(--warn);}
+  .status.err{color:var(--err);}
+  .hint{font-size:11px; color:var(--muted); margin-top:4px;}
+  .device-list{max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; padding:8px;}
+  .device-list label{
+    display:flex; gap:8px; align-items:baseline; text-transform:none; letter-spacing:0;
+    font-size:12.5px; color:var(--text); margin:0; padding:5px 2px; font-family:var(--sans);
+  }
+  .device-list .spec-inline{color:var(--muted); font-family:var(--mono); font-size:11px;}
+  .grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(320px,1fr)); gap:18px; align-content:start;}
+  .device-card{background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+  .device-card .spec{
+    display:flex; justify-content:space-between; gap:10px; padding:10px 14px;
+    font-family:var(--mono); font-size:10.5px; color:var(--muted); border-bottom:1px solid var(--border);
+  }
+  .device-card .spec b{color:var(--text); font-weight:600;}
+  .preview-wrap{background:var(--panel-2); display:flex; align-items:center; justify-content:center; overflow:auto; padding:14px;}
+  iframe{border:0; background:#fff; display:block;}
+  .flash{animation:einkflash .5s ease;}
+  @keyframes einkflash{ 0%{filter:invert(1) contrast(1.1);} 60%{filter:invert(1) contrast(1.1);} 100%{filter:invert(0);} }
+  .empty{color:var(--muted); font-size:13px; padding:40px 0; text-align:center; grid-column:1/-1;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>TRMNL QA Suite — prototype</h1>
+  <p>Poll une URL réelle, rends ton Liquid avec le vrai Framework TRMNL, compare tous les devices en une vue.</p>
+</header>
+
+<div class="layout">
+  <div class="panel">
+    <label for="pollUrl">URL de polling</label>
+    <input id="pollUrl" placeholder="https://tonprojet.github.io/data.json" />
+    <button id="fetchBtn">Charger les données</button>
+    <div id="fetchStatus" class="status"></div>
+    <details id="dataInspector" style="margin-top:6px; display:none;">
+      <summary class="hint" style="cursor:pointer;">Voir les données JSON chargées</summary>
+      <pre id="dataInspectorContent" style="white-space:pre-wrap; font-size:10px; color:var(--muted); max-height:200px; overflow:auto; margin:6px 0 0; background:#0f1113; border:1px solid var(--border); border-radius:4px; padding:8px;"></pre>
+    </details>
+    <div class="hint">Si le fetch échoue avec une erreur réseau/CORS, ton endpoint doit renvoyer un header Access-Control-Allow-Origin (GitHub Pages le fait généralement par défaut, à vérifier au cas par cas).</div>
+
+    <label for="liquidTpl">Template Liquid (contenu de full.liquid)</label>
+    <textarea id="liquidTpl" rows="10">&lt;div style="padding:20px;"&gt;
+  &lt;span class="title"&gt;{{ title | default: "Titre" }}&lt;/span&gt;
+  &lt;span class="value value--large"&gt;{{ value | default: "42" }}&lt;/span&gt;
+  &lt;span class="label"&gt;{{ label | default: "Exemple" }}&lt;/span&gt;
+&lt;/div&gt;</textarea>
+    <div class="hint">Colle ici le markup réel de ta recipe. Certains filtres Liquid custom de TRMNL (non-Shopify standard) ne sont pas encore supportés par ce prototype — à vérifier si le rendu Liquid échoue.</div>
+
+    <label>Shared (onglet "Shared" de ton plugin/recipe)</label>
+    <textarea id="sharedMarkup" rows="6" placeholder="Colle ici tout le contenu de l'onglet Shared, y compris les blocs {% template &quot;nom&quot; %}...{% endtemplate %}"></textarea>
+    <div class="hint">TRMNL préfixe automatiquement ce contenu devant chaque vue avant le rendu. C'est ici que tes {% template %} référencés par {% render %} doivent être définis.</div>
+
+    <label>Devices à tester</label>
+    <div id="frameworkStatus" class="status">Chargement du Framework TRMNL (plugins.css/js)…</div>
+    <div id="deviceList" class="device-list">Chargement des modèles officiels (trmnl.com/api/models)…</div>
+
+    <button id="renderBtn">Rendre</button>
+    <div id="jsonSizeStatus" class="status"></div>
+  </div>
+
+  <div id="previewGrid" class="grid">
+    <div class="empty">Charge des données puis clique sur « Rendre » pour voir l'aperçu multi-device.</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/liquidjs/10.21.1/liquid.browser.min.js"></script>
+<script>
+(function(){
+  // Filesystem en mémoire pour LiquidJS : évite qu'un {% render %} / {% include %}
+  // parte chercher un fichier "shared.liquid" par le réseau dans le navigateur.
+  var partials = {};
+  function normalizeKey(file){
+    return String(file).replace(/^["']|["']$/g, '').replace(/\.liquid$/, '');
+  }
+  var memoryFS = {
+    dirname: function(){ return ''; },
+    sep: '/',
+    resolve: function(dir, file){ return file; },
+    contains: function(){ return true; },
+    existsSync: function(file){ return normalizeKey(file) in partials; },
+    exists: function(file){ return Promise.resolve(normalizeKey(file) in partials); },
+    readFileSync: function(file){
+      var key = normalizeKey(file);
+      if(key in partials) return partials[key];
+      throw new Error('Partial "' + file + '" introuvable — colle son contenu dans le champ "Partial partagé".');
+    },
+    readFile: function(file){
+      var key = normalizeKey(file);
+      if(key in partials) return Promise.resolve(partials[key]);
+      return Promise.reject(new Error('Partial "' + file + '" introuvable — colle son contenu dans le champ "Partial partagé".'));
+    }
+  };
+  var engine = new liquidjs.Liquid({ fs: memoryFS, relativeReference: false });
+  var deviceModels = [];
+
+  // Reproduit le mécanisme réel de TRMNL : dans l'onglet "Shared", des blocs
+  // {% template "nom" %} ... {% endtemplate %} définissent des partials
+  // invocables via {% render "nom" %} dans les vues. On extrait ces blocs
+  // en amont (LiquidJS standard ne connaît pas le tag "template"), on les
+  // enregistre dans `partials`, puis on préfixe le reste du Shared markup
+  // (logique, styles, etc.) devant la vue — exactement comme TRMNL le fait.
+  function extractTemplateDefs(sharedText){
+    var re = /\{%-?\s*template\s+["']?([\w\-]+)["']?\s*-?%\}([\s\S]*?)\{%-?\s*endtemplate\s*-?%\}/g;
+    var m;
+    while((m = re.exec(sharedText))){
+      partials[m[1]] = m[2];
+    }
+    return sharedText.replace(re, '');
+  }
+  var lastData = null;
+  var DEFAULT_DEVICES = ['og_png', 'v2'];
+  var frameworkCSS = '';
+  var frameworkJS = '';
+  var frameworkLoaded = false;
+
+  async function loadFramework(){
+    var el = document.getElementById('frameworkStatus');
+    try{
+      var cssRes = await fetch('https://trmnl.com/css/latest/plugins.css', {method: 'HEAD', cache:'no-store'});
+      var jsRes = await fetch('https://trmnl.com/js/latest/plugins.js', {method: 'HEAD', cache:'no-store'});
+      if(!cssRes.ok || !jsRes.ok) throw new Error('HTTP ' + cssRes.status + '/' + jsRes.status);
+      frameworkLoaded = true;
+      if(el){ el.textContent = 'Framework TRMNL joignable (plugins.css/js) — chargé séparément par chaque device.'; el.className = 'status ok'; }
+    }catch(e){
+      frameworkLoaded = false;
+      if(el){ el.textContent = 'Framework TRMNL injoignable depuis cette page — ' + e.message + '. Les previews risquent de ne pas être stylées.'; el.className = 'status err'; }
+    }
+  }
+
+  var FALLBACK_MODELS = [
+    {name:'og_png', label:'TRMNL OG (1-bit)', width:800, height:480, bit_depth:1, kind:'trmnl', image_size_limit:90000,
+      css:{classes:{device:'screen--og_png', size:'screen--md', density:'screen--density-1x'},
+           variables:[['--screen-w','800px'],['--screen-h','480px'],['--pixel-ratio','1.0'],['--dither-pixel-ratio','1.0'],['--device-ui-scale','1.0'],['--gap-scale','1.0']]}},
+    {name:'v2', label:'TRMNL X', width:1872, height:1404, bit_depth:4, kind:'trmnl', image_size_limit:750000,
+      css:{classes:{device:'screen--v2', size:'screen--lg', density:'screen--density-2x'},
+           variables:[['--screen-w','1040px'],['--screen-h','780px'],['--pixel-ratio','1.8'],['--dither-pixel-ratio','2.0'],['--device-ui-scale','1.0'],['--gap-scale','1.0']]}}
+  ];
+
+  function escapeHtml(str){
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function getVar(model, key, fallback){
+    if(model.css && model.css.variables){
+      for(var i=0;i<model.css.variables.length;i++){
+        if(model.css.variables[i][0] === key) return model.css.variables[i][1];
+      }
+    }
+    return fallback;
+  }
+
+  async function loadModels(){
+    try{
+      var res = await fetch('https://trmnl.com/api/models', {cache:'no-store'});
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      var json = await res.json();
+      deviceModels = json.data;
+    }catch(e){
+      deviceModels = FALLBACK_MODELS;
+      console.warn('Modèles officiels indisponibles, fallback utilisé:', e.message);
+    }
+    renderDeviceList();
+    restoreConfig();
+  }
+
+  function renderDeviceList(){
+    var el = document.getElementById('deviceList');
+    el.innerHTML = '';
+    var sorted = deviceModels.slice().sort(function(a,b){
+      return (b.kind === 'trmnl') - (a.kind === 'trmnl');
+    });
+    sorted.forEach(function(m){
+      var id = 'dev_' + m.name;
+      var lbl = document.createElement('label');
+      lbl.innerHTML =
+        '<input type="checkbox" id="' + id + '" value="' + m.name + '" ' +
+        (DEFAULT_DEVICES.indexOf(m.name) !== -1 ? 'checked' : '') + '/>' +
+        '<span>' + m.label + '</span>' +
+        '<span class="spec-inline">' + m.width + '×' + m.height + ' · ' + m.bit_depth + 'bit</span>';
+      el.appendChild(lbl);
+    });
+  }
+
+  function selectedDevices(){
+    return deviceModels.filter(function(m){
+      var cb = document.getElementById('dev_' + m.name);
+      return cb && cb.checked;
+    });
+  }
+
+  async function fetchData(){
+    var url = document.getElementById('pollUrl').value.trim();
+    var statusEl = document.getElementById('fetchStatus');
+    if(!url){ statusEl.textContent = 'Entre une URL.'; statusEl.className = 'status warn'; return; }
+    statusEl.textContent = 'Chargement…'; statusEl.className = 'status';
+    try{
+      var res = await fetch(url, {cache:'no-store'});
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      var text = await res.text();
+      var data;
+      try{ data = JSON.parse(text); }
+      catch(e){ throw new Error('Réponse reçue mais non-JSON'); }
+      lastData = data;
+      var bytes = new Blob([text]).size;
+      statusEl.textContent = 'OK — ' + bytes.toLocaleString('fr-FR') + ' octets reçus.';
+      statusEl.className = 'status ok';
+      updateJsonSizeStatus(bytes);
+      document.getElementById('dataInspector').style.display = 'block';
+      document.getElementById('dataInspectorContent').textContent = JSON.stringify(data, null, 2);
+    }catch(e){
+      lastData = null;
+      document.getElementById('dataInspector').style.display = 'none';
+      var isNetworkErr = e instanceof TypeError;
+      statusEl.textContent = isNetworkErr
+        ? "Échec réseau — probablement CORS. L'endpoint doit autoriser les requêtes cross-origin."
+        : 'Échec — ' + e.message;
+      statusEl.className = 'status err';
+    }
+  }
+
+  function updateJsonSizeStatus(bytes){
+    var el = document.getElementById('jsonSizeStatus');
+    var kb = (bytes / 1024).toFixed(1);
+    if(bytes > 100000){
+      el.textContent = '⚠ Payload JSON : ' + kb + ' KB — au-delà du seuil indicatif de 100KB (repère empirique, pas une limite officielle confirmée).';
+      el.className = 'status warn';
+    }else{
+      el.textContent = 'Payload JSON : ' + kb + ' KB.';
+      el.className = 'status';
+    }
+  }
+
+  function buildIframeDoc(renderedHtml, model){
+    var vars = (model.css && model.css.variables ? model.css.variables : [])
+      .map(function(v){ return v[0] + ':' + v[1] + ';'; }).join('');
+    var classes = model.css && model.css.classes ? Object.values(model.css.classes).join(' ') : '';
+    var w = getVar(model, '--screen-w', model.width + 'px');
+    var h = getVar(model, '--screen-h', model.height + 'px');
+    var diagnosticScript =
+      '<script>' +
+      'window.addEventListener("load", function(){' +
+      '  var d = document.createElement("div");' +
+      '  d.style.cssText = "position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;font:10px monospace;padding:3px;z-index:99999;white-space:pre;";' +
+      '  var linkOk = false, cssRuleCount = "n/a";' +
+      '  try{ for(var i=0;i<document.styleSheets.length;i++){' +
+      '    try{ var n = document.styleSheets[i].cssRules.length; if(n>0){ linkOk = true; cssRuleCount = n; } }catch(e){ cssRuleCount = "cross-origin (bloqué en lecture, mais peut quand meme s\'appliquer)"; }' +
+      '  } }catch(e){}' +
+      '  var jsOk = (typeof window.Trmnl !== "undefined") || (typeof window.terminalize !== "undefined");' +
+      '  d.textContent = "sheets:" + document.styleSheets.length + " rules:" + cssRuleCount + " js:" + jsOk;' +
+      '  if(document.styleSheets.length > 0 && cssRuleCount !== "n/a" && cssRuleCount !== 0) d.style.background = "#27ae60";' +
+      '  document.body.appendChild(d);' +
+      '});' +
+      '<\/script>';
+    return '<!doctype html><html><head><meta charset="utf-8">' +
+      '<link rel="stylesheet" href="https://trmnl.com/css/latest/plugins.css">' +
+      '<script src="https://trmnl.com/js/latest/plugins.js"><\/script>' +
+      '<style>:root{' + vars + '} html,body{margin:0;padding:0;overflow:hidden;} ' +
+      'body{width:' + w + '; height:' + h + ';}</style>' +
+      '</head><body class="environment trmnl ' + classes + '">' + diagnosticScript + '<div class="screen">' + renderedHtml + '</div></body></html>';
+  }
+
+  async function renderAll(){
+    var grid = document.getElementById('previewGrid');
+    var tpl = document.getElementById('liquidTpl').value;
+    var devices = selectedDevices();
+
+    if(devices.length === 0){
+      grid.innerHTML = '<div class="empty">Sélectionne au moins un device.</div>';
+      return;
+    }
+
+    var sharedRaw = document.getElementById('sharedMarkup').value;
+    var sharedCleaned = extractTemplateDefs(sharedRaw);
+    var fullTpl = sharedCleaned + '\n' + tpl;
+
+    var rendered;
+    try{
+      rendered = await engine.parseAndRender(fullTpl, lastData || {});
+    }catch(e){
+      grid.innerHTML = '<div class="empty" style="color:var(--err)">Erreur Liquid : ' + e.message + '</div>';
+      return;
+    }
+
+    grid.innerHTML = '';
+    devices.forEach(function(model){
+      var cssW = parseInt(getVar(model, '--screen-w', model.width + 'px'), 10);
+      var cssH = parseInt(getVar(model, '--screen-h', model.height + 'px'), 10);
+      var scale = Math.min(300 / cssW, 220 / cssH, 1);
+
+      var card = document.createElement('div');
+      card.className = 'device-card';
+      card.innerHTML =
+        '<div class="spec"><span><b>' + model.label + '</b></span>' +
+        '<span>' + model.width + '×' + model.height + ' · ' + model.bit_depth + 'bit' +
+        (model.image_size_limit ? ' · limite image ' + Math.round(model.image_size_limit / 1000) + 'KB' : '') +
+        '</span></div>' +
+        '<div class="preview-wrap" style="height:' + (cssH * scale + 28) + 'px;">' +
+        '<div style="width:' + cssW + 'px;height:' + cssH + 'px;transform:scale(' + scale + ');transform-origin:top left;">' +
+        '<iframe class="flash" width="' + cssW + '" height="' + cssH + '" sandbox="allow-scripts"></iframe>' +
+        '</div></div>' +
+        '<details style="padding:8px 14px;"><summary class="hint" style="cursor:pointer;">Voir le HTML généré</summary>' +
+        '<pre style="white-space:pre-wrap; font-size:10px; color:var(--muted); max-height:160px; overflow:auto; margin:6px 0 0;">' +
+        escapeHtml(rendered) + '</pre></details>';
+      grid.appendChild(card);
+      card.querySelector('iframe').srcdoc = buildIframeDoc(rendered, model);
+    });
+
+    localStorage.setItem('trmnl_qa_suite_config', JSON.stringify({
+      url: document.getElementById('pollUrl').value,
+      tpl: tpl,
+      sharedMarkup: sharedRaw,
+      devices: devices.map(function(d){ return d.name; })
+    }));
+  }
+
+  function restoreConfig(){
+    var raw = localStorage.getItem('trmnl_qa_suite_config');
+    if(!raw) return;
+    try{
+      var cfg = JSON.parse(raw);
+      if(cfg.url) document.getElementById('pollUrl').value = cfg.url;
+      if(cfg.tpl) document.getElementById('liquidTpl').value = cfg.tpl;
+      if(cfg.sharedMarkup) document.getElementById('sharedMarkup').value = cfg.sharedMarkup;
+      if(cfg.devices && cfg.devices.length){
+        deviceModels.forEach(function(m){
+          var cb = document.getElementById('dev_' + m.name);
+          if(cb) cb.checked = cfg.devices.indexOf(m.name) !== -1;
+        });
+      }
+    }catch(e){ /* config corrompue, on ignore */ }
+  }
+
+  document.getElementById('fetchBtn').addEventListener('click', fetchData);
+  document.getElementById('renderBtn').addEventListener('click', renderAll);
+  loadModels();
+  loadFramework();
+})();
+</script>
+</body>
+</html>
